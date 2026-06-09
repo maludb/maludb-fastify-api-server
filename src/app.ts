@@ -9,6 +9,7 @@ import { registerRoutes } from './http/route-map.js';
 import { ApiError } from './http/errors.js';
 import { sendError } from './http/response.js';
 import { mapError } from './db/errors.js';
+import { shutdownPools } from './db/tenant.js';
 import { apiLog } from './logging/api-log.js';
 import type { RequestCtx } from './types/db.js';
 
@@ -103,6 +104,11 @@ export function buildApp(): FastifyInstance {
       errorCode: r.apiErrorCode ?? null,
       stack: reply.statusCode >= 500 ? r.apiErrorStack ?? null : null,
     });
+  });
+
+  // Close tenant Postgres pools on shutdown.
+  app.addHook('onClose', async () => {
+    await shutdownPools();
   });
 
   // Routes registered last so the onRoute hook has captured the method map for every URL.
