@@ -17,7 +17,6 @@ import { configDbPath } from './config/paths.js';
 import { runTokenCommand } from './local-db/token-cli.js';
 
 function out(msg: string): void {
-  // eslint-disable-next-line no-console
   console.log(msg);
 }
 
@@ -83,7 +82,6 @@ if (invokedDirectly) {
       if (code !== 0) process.exit(code);
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
       console.error(err);
       process.exit(1);
     });

@@ -14,13 +14,11 @@ import { testCredentials } from '../db/tenant.js';
 import type { TenantConfig } from '../types/db.js';
 
 function err(msg: string): number {
-  // eslint-disable-next-line no-console
   console.error(msg);
   return 1;
 }
 
 function out(msg: string): void {
-  // eslint-disable-next-line no-console
   console.log(msg);
 }
 

@@ -13,4 +13,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    // Plain JS build helpers (not TS) need Node globals declared for no-undef.
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: { console: 'readonly', process: 'readonly', Buffer: 'readonly' },
+    },
+  },
 );

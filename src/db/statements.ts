@@ -6,7 +6,7 @@
  * search path). Ported verbatim from the PHP `config/response.php`.
  */
 import { dbOne } from './query.js';
-import { isNumeric, jsonOrDefault, toNumOrNull } from './coerce.js';
+import { isNumeric, toNumOrNull } from './coerce.js';
 import { jsonError } from '../http/errors.js';
 import type { RequestCtx, Row } from '../types/db.js';
 
