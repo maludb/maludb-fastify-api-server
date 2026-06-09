@@ -1,13 +1,132 @@
 /**
  * Route registration — the mechanical replacement for the PHP `.htaccess` URL→file rewrite rules
- * (brief §16). This is a flat, obvious list: one `register()` import per route file, called once.
- * It is the only place the full endpoint surface is enumerated; keep it boring and explicit so the
- * URL→file relationship stays a two-click lookup. New endpoints are added here as they are ported.
+ * (brief §16). A flat, obvious list: one `register()` import per route file, called once. This is
+ * the only place the full endpoint surface is enumerated; keep it boring and explicit so the
+ * URL→file relationship stays a two-click lookup. Generated from src/routes/v1/ (alphabetical,
+ * health first).
  */
 import type { FastifyInstance } from 'fastify';
 
 import { register as health } from '../routes/v1/health.js';
+import { register as attributeCheck } from '../routes/v1/attribute-check.js';
+import { register as attributeTemplates } from '../routes/v1/attribute-templates.js';
+import { register as attributeTemplatesId } from '../routes/v1/attribute-templates_id.js';
+import { register as attributes } from '../routes/v1/attributes.js';
+import { register as attributesId } from '../routes/v1/attributes_id.js';
+import { register as documentTypes } from '../routes/v1/document-types.js';
+import { register as documentTypesId } from '../routes/v1/document-types_id.js';
+import { register as documents } from '../routes/v1/documents.js';
+import { register as documentsBackfill } from '../routes/v1/documents-backfill.js';
+import { register as documentsId } from '../routes/v1/documents_id.js';
+import { register as edges } from '../routes/v1/edges.js';
+import { register as episodeTypes } from '../routes/v1/episode-types.js';
+import { register as episodeTypesId } from '../routes/v1/episode-types_id.js';
+import { register as episodes } from '../routes/v1/episodes.js';
+import { register as episodesId } from '../routes/v1/episodes_id.js';
+import { register as episodesIdStatements } from '../routes/v1/episodes_id_statements.js';
+import { register as graphNeighbors } from '../routes/v1/graph_neighbors.js';
+import { register as graphWalk } from '../routes/v1/graph_walk.js';
+import { register as memoryConfig } from '../routes/v1/memory_config.js';
+import { register as memoryDocuments } from '../routes/v1/memory_documents.js';
+import { register as memoryIngest } from '../routes/v1/memory_ingest.js';
+import { register as memorySearch } from '../routes/v1/memory_search.js';
+import { register as modelPrompts } from '../routes/v1/model-prompts.js';
+import { register as notes } from '../routes/v1/notes.js';
+import { register as notesId } from '../routes/v1/notes_id.js';
+import { register as notesIdCloseIssue } from '../routes/v1/notes_id_close-issue.js';
+import { register as notesIdReopenIssue } from '../routes/v1/notes_id_reopen-issue.js';
+import { register as objects } from '../routes/v1/objects.js';
+import { register as objectsId } from '../routes/v1/objects_id.js';
+import { register as pools } from '../routes/v1/pools.js';
+import { register as poolsId } from '../routes/v1/pools_id.js';
+import { register as poolsIdArchive } from '../routes/v1/pools_id_archive.js';
+import { register as projects } from '../routes/v1/projects.js';
+import { register as projectsId } from '../routes/v1/projects_id.js';
+import { register as projectsIdArchive } from '../routes/v1/projects_id_archive.js';
+import { register as projectsIdSubjects } from '../routes/v1/projects_id_subjects.js';
+import { register as projectsIdSubjectsId } from '../routes/v1/projects_id_subjects_id.js';
+import { register as projectsIdUnarchive } from '../routes/v1/projects_id_unarchive.js';
+import { register as projectsIdVerbs } from '../routes/v1/projects_id_verbs.js';
+import { register as projectsIdVerbsId } from '../routes/v1/projects_id_verbs_id.js';
+import { register as skills } from '../routes/v1/skills.js';
+import { register as skillsId } from '../routes/v1/skills_id.js';
+import { register as skillsIdDuplicate } from '../routes/v1/skills_id_duplicate.js';
+import { register as statements } from '../routes/v1/statements.js';
+import { register as statementsId } from '../routes/v1/statements_id.js';
+import { register as subjectRelationshipsId } from '../routes/v1/subject-relationships_id.js';
+import { register as subjectTypes } from '../routes/v1/subject-types.js';
+import { register as subjects } from '../routes/v1/subjects.js';
+import { register as subjectsId } from '../routes/v1/subjects_id.js';
+import { register as subjectsIdRelatedSubjects } from '../routes/v1/subjects_id_related-subjects.js';
+import { register as subjectsIdRelatedSubjectsId } from '../routes/v1/subjects_id_related-subjects_id.js';
+import { register as subjectsIdVerbs } from '../routes/v1/subjects_id_verbs.js';
+import { register as subjectsIdVerbsId } from '../routes/v1/subjects_id_verbs_id.js';
+import { register as tokens } from '../routes/v1/tokens.js';
+import { register as tokensId } from '../routes/v1/tokens_id.js';
+import { register as verbTypes } from '../routes/v1/verb-types.js';
+import { register as verbs } from '../routes/v1/verbs.js';
+import { register as verbsId } from '../routes/v1/verbs_id.js';
+import { register as verbsIdSubjects } from '../routes/v1/verbs_id_subjects.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await health(app);
+  await attributeCheck(app);
+  await attributeTemplates(app);
+  await attributeTemplatesId(app);
+  await attributes(app);
+  await attributesId(app);
+  await documentTypes(app);
+  await documentTypesId(app);
+  await documents(app);
+  await documentsBackfill(app);
+  await documentsId(app);
+  await edges(app);
+  await episodeTypes(app);
+  await episodeTypesId(app);
+  await episodes(app);
+  await episodesId(app);
+  await episodesIdStatements(app);
+  await graphNeighbors(app);
+  await graphWalk(app);
+  await memoryConfig(app);
+  await memoryDocuments(app);
+  await memoryIngest(app);
+  await memorySearch(app);
+  await modelPrompts(app);
+  await notes(app);
+  await notesId(app);
+  await notesIdCloseIssue(app);
+  await notesIdReopenIssue(app);
+  await objects(app);
+  await objectsId(app);
+  await pools(app);
+  await poolsId(app);
+  await poolsIdArchive(app);
+  await projects(app);
+  await projectsId(app);
+  await projectsIdArchive(app);
+  await projectsIdSubjects(app);
+  await projectsIdSubjectsId(app);
+  await projectsIdUnarchive(app);
+  await projectsIdVerbs(app);
+  await projectsIdVerbsId(app);
+  await skills(app);
+  await skillsId(app);
+  await skillsIdDuplicate(app);
+  await statements(app);
+  await statementsId(app);
+  await subjectRelationshipsId(app);
+  await subjectTypes(app);
+  await subjects(app);
+  await subjectsId(app);
+  await subjectsIdRelatedSubjects(app);
+  await subjectsIdRelatedSubjectsId(app);
+  await subjectsIdVerbs(app);
+  await subjectsIdVerbsId(app);
+  await tokens(app);
+  await tokensId(app);
+  await verbTypes(app);
+  await verbs(app);
+  await verbsId(app);
+  await verbsIdSubjects(app);
 }

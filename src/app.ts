@@ -5,6 +5,7 @@
  * PostgreSQL-SQLSTATE mapping, a 405-aware not-found handler, and one api.log line per request.
  */
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import multipart from '@fastify/multipart';
 import { registerRoutes } from './http/route-map.js';
 import { ApiError } from './http/errors.js';
 import { sendError } from './http/response.js';
@@ -37,6 +38,10 @@ function patternToRegExp(pattern: string): RegExp {
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: BODY_LIMIT });
+
+  // Multipart uploads (e.g. POST /v1/documents). attachFieldsToBody keeps the file in memory so the
+  // handler can read its bytes for maludb_source_package.content_bytes (bytea).
+  app.register(multipart, { limits: { fileSize: BODY_LIMIT } });
 
   // Tolerant JSON parser: empty body → {} (like PHP `body_json`); invalid JSON → 400 body_invalid_json.
   app.addContentTypeParser(
