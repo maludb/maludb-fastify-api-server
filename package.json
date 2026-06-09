@@ -1,0 +1,47 @@
+{
+  "name": "maludb-api-server",
+  "version": "0.1.0",
+  "description": "MaluDB API server — a readable TypeScript + Fastify reference implementation for MaluDB SQL. One route file per endpoint; the SQL stays literal and visible.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "maludb-api-server": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc && node scripts/copy-assets.mjs",
+    "start": "node dist/server.js",
+    "init": "tsx src/cli.ts init",
+    "migrate": "tsx src/cli.ts migrate",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^9.0.3",
+    "better-sqlite3": "^11.8.1",
+    "fastify": "^5.2.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.11.10",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.19.1",
+    "vitest": "^2.1.8"
+  }
+}

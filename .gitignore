@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+coverage/
+
+# Local runtime data (config DB + logs live under ~/.maludb by default; ignore any local copies)
+.maludb/
+*.sqlite
+*.sqlite-journal
