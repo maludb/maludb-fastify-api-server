@@ -8,6 +8,9 @@
  * Teaches:
  *   - Live-schema mapping: skill_id -> id, skill_name -> name.
  *   - DB enforces visibility/packaging_kind value sets (→ 422).
+ *   - Registered agent skills (bundle_hash set, 0.97.0) are content-immutable: PATCH on
+ *     name/markdown/version/packaging_kind → 409 skill_content_immutable; re-upload the bundle
+ *     via POST /v1/skills/ingest instead.
  */
 import type { FastifyInstance } from 'fastify';
 import { requireAuth } from '../../http/auth.js';
@@ -18,6 +21,10 @@ import { pathId, bodyObject } from '../../http/request.js';
 import type { RequestCtx } from '../../types/db.js';
 
 const FILE = 'skills_id.ts';
+
+// Content columns rejected on PATCH once a skill carries a bundle_hash (agent-skill ingest,
+// maludb_core 0.97.0): the registered bundle is immutable; lifecycle fields stay editable.
+const IMMUTABLE_FIELDS = ['name', 'markdown', 'version', 'packaging_kind'];
 
 /** Fetch a skill by id, or null. */
 async function loadSkill(ctx: RequestCtx, id: number): Promise<Record<string, unknown> | null> {
@@ -56,11 +63,33 @@ export async function register(app: FastifyInstance): Promise<void> {
         }
 
         case 'PATCH': {
-          if ((await dbOne(ctx, 'SELECT 1 FROM maludb_skill WHERE skill_id = $1', [id])) === null) {
+          const row = await dbOne(ctx, 'SELECT bundle_hash FROM maludb_skill WHERE skill_id = $1', [
+            id,
+          ]);
+          if (row === null) {
             jsonError('not_found', 'Skill not found.', 404);
           }
 
           const body = bodyObject(request);
+
+          // Registered agent skills (bundle_hash set) are content-immutable (a DB trigger
+          // enforces this too); a changed bundle must be re-ingested as a new skill version.
+          if (row.bundle_hash !== null && row.bundle_hash !== undefined && row.bundle_hash !== '') {
+            const blocked = IMMUTABLE_FIELDS.filter((f) =>
+              Object.prototype.hasOwnProperty.call(body, f),
+            );
+            if (blocked.length > 0) {
+              jsonError(
+                'skill_content_immutable',
+                'Fields ' +
+                  blocked.join(', ') +
+                  ' are immutable on a registered agent skill; re-upload the changed bundle' +
+                  ' via POST /v1/skills/ingest (it becomes a new version with fork lineage).' +
+                  ' Editable here: description, visibility, enabled.',
+                409,
+              );
+            }
+          }
           const fields: string[] = [];
           const params: unknown[] = [];
 

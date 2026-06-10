@@ -207,20 +207,36 @@ MaluDB SQL objects → request/response shape → the MaluDB concept it teaches.
 ## Skills
 
 ### `GET POST` /v1/skills   → `skills.ts`
-- **Methods**: GET — list skills (optional visibility filter); POST — create a skill
-- **SQL objects**: maludb_skill (direct-INSERT view)
+- **Methods**: GET — list skills (optional visibility filter; `?subject`/`?verb` switch to tag search); POST — create a skill
+- **SQL objects**: maludb_skill (direct-INSERT view), maludb_skill_search (function; 0.97.0)
 - **tx**: no
-- **Request**: `?visibility`, `?q`, `?limit`; POST body `{name*, description?, markdown?, version?, visibility?, packaging_kind?, enabled?}`
-- **Response**: `{skills:[...]}`; create → `{skill:{...}}` (201)
-- **Teaches**: A skill is a versioned, visibility-scoped artifact; DB enforces `visibility∈{private,shared,public}` and `packaging_kind` sets (→422).
+- **Request**: `?visibility`, `?q`, `?subject`, `?verb`, `?limit`; POST body `{name*, description?, markdown?, version?, visibility?, packaging_kind?, enabled?}`
+- **Response**: `{skills:[...]}` (tag search rows add `owner_schema, subjects, verbs, keywords, score, match_reasons, is_public, is_forkable, source_owner_schema, source_skill_id`); create → `{skill:{...}}` (201)
+- **Teaches**: A skill is a versioned, visibility-scoped artifact; with `?subject`/`?verb` discovery goes through `maludb_skill_search` (tag tables + keyword/tsquery rails, public-skill folding, scoring, lineage); DB enforces `visibility∈{private,shared,public}` and `packaging_kind` sets (→422).
 
 ### `GET PATCH DELETE` /v1/skills/:id   → `skills_id.ts`
 - **Methods**: GET — skill detail (incl. markdown); PATCH — update; DELETE — remove
 - **SQL objects**: maludb_skill
 - **tx**: no
 - **Request**: PATCH body `{name?, description?, markdown?, version?, visibility?, packaging_kind?, enabled?}`
-- **Response**: `{skill:{...}}`; DELETE → `{deleted:true,id}`
-- **Teaches**: The skill body lives in `markdown`; mutation bumps `updated_at` and the DB validates enum fields.
+- **Response**: `{skill:{...}}`; DELETE → `{deleted:true,id}`; PATCH of `name/markdown/version/packaging_kind` on a registered agent skill (bundle_hash set) → 409 `skill_content_immutable`
+- **Teaches**: The skill body lives in `markdown`; mutation bumps `updated_at` and the DB validates enum fields. Registered agent skills (0.97.0) are content-immutable — re-upload the bundle via POST /v1/skills/ingest; only description/visibility/enabled stay editable.
+
+### `GET` /v1/skills/:id/bundle   → `skills_id_bundle.ts`
+- **Methods**: GET — full agent-skill bundle for client-side reconstruction (skill pull)
+- **SQL objects**: maludb_skill, maludb_skill_file, maludb_source_package
+- **tx**: no
+- **Request**: path id only
+- **Response**: `{skill:{...,bundle_hash,frontmatter_jsonb,source_owner_schema,source_skill_id}, files:[{relative_path, file_hash, file_size, is_executable, media_type, content_base64}]}`; 404 if missing
+- **Teaches**: The bundle manifest joins to content-hash-deduped `maludb_source_package` rows; base64 content + per-file hashes + executable bits let the client rebuild the directory and verify it against `bundle_hash`. Pre-bundle markdown skills pull as a synthesized one-file SKILL.md bundle.
+
+### `POST` /v1/skills/ingest   → `skills_ingest.ts`
+- **Methods**: POST — register a Claude Agent Skill bundle as an immutable skill version (maludb_core 0.97.0)
+- **SQL objects**: maludb_skill, maludb_source_package, maludb_core.malu$skill_package, maludb_core.malu$skill_file, maludb_subject_type (catalog), maludb_memory_ingest_extraction (function), maludb_skill_register (function)
+- **tx**: yes — one `db_tx_core()` transaction wraps graph ingest + bundle storage + registration
+- **Request**: body `{name*, markdown*, frontmatter?, version?, model?, preview?, materially_different?, parent?{owner_schema, skill_id}, files?[{relative_path, content_base64|content_text, is_executable?, media_type?}]}`
+- **Response**: 201 `{skill_id, version, bundle_hash, reused, model, parent:{owner_schema,skill_id,note}, materiality, register, ingest}`; identical re-push → 200 `{skill_id, version, bundle_hash, reused:true}`; preview → 200 prompt/extraction dry-run; 413 size caps (5 MB/file, 30 MB/bundle); 422 unsafe paths/invalid base64/model_not_configured; 409 model_api_key_missing; 501 ingest_unavailable (pre-0.97.0); 404 parent missing
+- **Teaches**: The canonical bundle hash (sorted `"<sha256>  <path>\n"` lines) is a skill version's identity (idempotent re-push); materiality (caller override > deterministic screens > LLM judge, gray defaults material) decides supersede-vs-coexist; discovery tags come from the configured LLM (skill-extract prompt + live type catalog) or a deterministic frontmatter fallback; SKILL.md becomes an `agent_skill` document and the skill a `type='skill'` graph subject.
 
 ### `POST` /v1/skills/:id/duplicate   → `skills_id_duplicate.ts`
 - **Methods**: POST — fork the skill into a new owned copy

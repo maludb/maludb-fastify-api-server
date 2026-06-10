@@ -94,6 +94,16 @@ curl localhost:8080/v1/subjects -H "Authorization: Bearer malu_…"
 See [`docs/endpoint-map.md`](docs/endpoint-map.md) for the full catalog (URL → file → SQL objects →
 what it teaches). Start with [`docs/learning-path.md`](docs/learning-path.md).
 
+### Agent skills (maludb_core 0.97.0)
+
+`POST /v1/skills/ingest` registers a Claude Agent Skill bundle (SKILL.md +
+scripts/references/assets) as an immutable skill version; `GET /v1/skills/:id/bundle` pulls it
+back for reconstruction, and `GET /v1/skills?subject=…&verb=…` searches the discovery tags.
+[`config/prompts/skill-extract.system.txt`](config/prompts/skill-extract.system.txt) is **seed
+content for a `model_prompts` row**: register it (with your model + API key) via
+`POST /v1/model-prompts` to enable LLM-based discovery-tag extraction on ingest. Without a
+configured model, ingest falls back to a deterministic frontmatter-only extractor.
+
 ## Develop
 
 ```bash
