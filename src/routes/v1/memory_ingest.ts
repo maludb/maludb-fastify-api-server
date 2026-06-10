@@ -2,7 +2,9 @@
  * POST /v1/memory/ingest
  *   (text → LLM extraction → memory ingest; per-model prompt, OpenAI + Anthropic)
  *
- *   POST  Body: { text (required), model? (default 'chatgpt-4o'), hints? (array of
+ *   POST  Body: { text (required), model? (optional — explicit model name; resolution order is
+ *                 legacy model_prompts → seeded catalog + the caller's provider key → the user's
+ *                 'extract' choice → the legacy 'chatgpt-4o' model_prompts row), hints? (array of
  *                 {"subject-type","subject-name"}), namespace?, preview? }
  *
  *   Contract (per the GPT-4o memory-extraction prompt): the model is given the stored SYSTEM
@@ -23,6 +25,7 @@ import { jsonResponse } from '../../http/response.js';
 import { jsonError } from '../../http/errors.js';
 import { bodyObject } from '../../http/request.js';
 import { llmComplete, llmJsonFromText } from '../../memory/llm.js';
+import { resolveTaskConfig, type ResolvedTaskConfig } from '../../memory/resolve.js';
 import { renderTypeCatalog } from '../../memory/type-catalog.js';
 import { modelPrompt } from '../../local-db/local-db.js';
 
@@ -53,10 +56,10 @@ export async function register(app: FastifyInstance): Promise<void> {
       const text = body.text !== undefined ? String(body.text) : '';
       if (text.trim() === '') jsonError('missing_field', 'Field "text" is required.', 400);
 
-      const model =
+      const explicitModel =
         body.model !== undefined && String(body.model).trim() !== ''
-          ? String(body.model)
-          : 'chatgpt-4o';
+          ? String(body.model).trim()
+          : null;
       const namespace =
         body.namespace !== undefined && String(body.namespace).trim() !== ''
           ? String(body.namespace)
@@ -82,8 +85,19 @@ export async function register(app: FastifyInstance): Promise<void> {
         hintsJson = '[]';
       }
 
-      // --- per-model prompt + LLM connection (local SQLite store) ---
-      const pr = modelPrompt(model);
+      // --- per-model prompt + LLM connection. Resolution order: explicit model (legacy
+      //     model_prompts first, then the seeded catalog + the caller's provider key) → the
+      //     user's 'extract' choice → the legacy default ('chatgpt-4o' model_prompts row). ---
+      let pr: ResolvedTaskConfig | null = resolveTaskConfig(
+        Number(ctx.userId),
+        'extract',
+        explicitModel,
+      );
+      const model = pr !== null ? pr.model_name : (explicitModel ?? 'chatgpt-4o');
+      if (pr === null) {
+        const legacy = modelPrompt(model);
+        if (legacy !== null) pr = { ...legacy, provider: null, source: 'model_prompts' };
+      }
       if (pr === null) {
         jsonError(
           'model_not_configured',
@@ -116,7 +130,7 @@ export async function register(app: FastifyInstance): Promise<void> {
       // --- build the messages ---
       // Substitute the rendered catalog into the stored SYSTEM prompt. A legacy prompt with no
       // {{ENTITY_TYPES}}/{{EVENT_KINDS}} placeholders is left unchanged (backward-compatible).
-      const system = pr.system_prompt
+      const system = String(pr.system_prompt ?? '')
         .replace(/\{\{ENTITY_TYPES\}\}/g, catalog.entityBlock)
         .replace(/\{\{EVENT_KINDS\}\}/g, catalog.eventBlock);
       const user = `TEXT:\n${text}\n\nHINTS:\n${hintsJson}\n\nKNOWN_SUBJECTS:\n${knownSubjectsJson}\n\nKNOWN_VERBS:\n${knownVerbsJson}\n`;
@@ -143,11 +157,12 @@ export async function register(app: FastifyInstance): Promise<void> {
       }
 
       if (pr.api_key === null || pr.api_key === '') {
-        jsonError(
-          'model_api_key_missing',
-          'No API key set for model "' + model + '". Set it via POST /v1/model-prompts.',
-          409,
-        );
+        const msg =
+          pr.source === 'catalog_explicit' || pr.source === 'user_choice'
+            ? `No API key stored for provider "${pr.provider}".` +
+              ` Set one via PUT /v1/llm/providers/${pr.provider}.`
+            : 'No API key set for model "' + model + '". Set it via POST /v1/model-prompts.';
+        jsonError('model_api_key_missing', msg, 409);
       }
 
       // The 0.92.0 ingest facade must be present (the model JSON is passed to it verbatim).

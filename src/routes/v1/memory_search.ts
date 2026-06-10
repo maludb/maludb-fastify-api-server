@@ -18,6 +18,7 @@ import { jsonResponse } from '../../http/response.js';
 import { jsonError } from '../../http/errors.js';
 import { bodyObject } from '../../http/request.js';
 import { memEmbed } from '../../memory/llm.js';
+import { resolveEmbedConfig } from '../../memory/resolve.js';
 import { memVectorLiteral } from '../../memory/memory-db.js';
 
 const FILE = 'memory_search.ts';
@@ -60,21 +61,24 @@ export async function register(app: FastifyInstance): Promise<void> {
           ? String(body.metric)
           : 'cosine';
 
-      // Same embedding model as ingest (from namespace config, else body/env/deterministic).
+      // Same embedding model (and precedence) as document ingest:
+      // body > namespace config > the user's 'embed' choice > env default.
       const row = await dbTxCore(ctx, () =>
         dbOne(ctx, 'SELECT maludb_memory_model_config($1) AS cfg', [namespace]),
       );
       // jsonb is already parsed by node-pg — no JSON.parse.
       const cfg =
         row !== null && row.cfg !== null ? (row.cfg as Record<string, unknown>) : {};
+      const userEmbed = resolveEmbedConfig(Number(ctx.userId));
       const embeddingModel =
         body.embedding_model !== undefined && String(body.embedding_model).trim() !== ''
           ? String(body.embedding_model)
           : ((cfg.embedding_model as string | undefined) ??
+            userEmbed.embedding_model ??
             (process.env.MALUDB_EMBED_MODEL || 'maludb-local-dev'));
 
       const vector = memVectorLiteral(
-        await memEmbed(query, { embedding_model: embeddingModel }),
+        await memEmbed(query, { ...userEmbed, embedding_model: embeddingModel }),
       );
 
       const rows = await dbTxCore(ctx, () =>

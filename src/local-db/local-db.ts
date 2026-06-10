@@ -11,7 +11,18 @@ import { chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDbPath, schemaSqlPath } from '../config/paths.js';
-import type { ModelPromptRow, TokenRow, UserTokenRow } from '../types/auth.js';
+import { seedDefaultPrompts } from './llm-catalog.js';
+import type {
+  DefaultPromptListRow,
+  DefaultPromptRow,
+  ModelPromptRow,
+  TokenRow,
+  UserModelChoiceListRow,
+  UserModelChoiceRow,
+  UserProviderKeyListRow,
+  UserProviderKeyRow,
+  UserTokenRow,
+} from '../types/auth.js';
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +49,9 @@ export function openLocalDb(path = configDbPath()): Database {
   } catch {
     // Best-effort on platforms without POSIX perms.
   }
+  // Seed the default_prompts catalog (INSERT OR IGNORE — idempotent, never overwrites operator
+  // edits). Runs on init, migrate, and every server start.
+  seedDefaultPrompts(db);
   return db;
 }
 
@@ -208,4 +222,170 @@ export function listModelPrompts(): ModelPromptRow[] {
          FROM model_prompts ORDER BY model_name`,
     )
     .all() as ModelPromptRow[];
+}
+
+/* ------------------- default-prompt catalog (seeded by llm-catalog.ts) ------------------- */
+
+/** Load the catalog row for (model_name, task), or null. */
+export function defaultPrompt(modelName: string, task: string): DefaultPromptRow | null {
+  const row = localDb()
+    .prepare(
+      `SELECT provider, model_name, model_identifier, api_format, base_url,
+              task, system_prompt, max_tokens, generation_params
+         FROM default_prompts
+        WHERE model_name = ? AND task = ?
+        LIMIT 1`,
+    )
+    .get(modelName, task) as DefaultPromptRow | undefined;
+  return row ?? null;
+}
+
+/** All catalog rows (without the prompt text — it can be large). */
+export function listDefaultPrompts(): DefaultPromptListRow[] {
+  const rows = localDb()
+    .prepare(
+      `SELECT provider, model_name, model_identifier, api_format, base_url,
+              task, max_tokens,
+              (system_prompt IS NOT NULL AND system_prompt <> '') AS has_system_prompt
+         FROM default_prompts
+        ORDER BY task, provider, model_name`,
+    )
+    .all() as (Omit<DefaultPromptListRow, 'has_system_prompt'> & { has_system_prompt: number })[];
+  return rows.map((r) => ({ ...r, has_system_prompt: Boolean(r.has_system_prompt) }));
+}
+
+/** Distinct providers present in the catalog. */
+export function catalogProviders(): string[] {
+  const rows = localDb()
+    .prepare(`SELECT DISTINCT provider FROM default_prompts ORDER BY provider`)
+    .all() as { provider: string }[];
+  return rows.map((r) => r.provider);
+}
+
+/** Distinct tasks present in the catalog. */
+export function catalogTasks(): string[] {
+  const rows = localDb()
+    .prepare(`SELECT DISTINCT task FROM default_prompts ORDER BY task`)
+    .all() as { task: string }[];
+  return rows.map((r) => r.task);
+}
+
+/* ----------------------------- per-user provider API keys ----------------------------- */
+
+/** The user's key row for a provider (includes api_key — internal use only). */
+export function userProviderKey(userId: number, provider: string): UserProviderKeyRow | null {
+  const row = localDb()
+    .prepare(
+      `SELECT provider, api_key, base_url FROM user_provider_keys
+        WHERE user_id = ? AND provider = ? LIMIT 1`,
+    )
+    .get(userId, provider) as UserProviderKeyRow | undefined;
+  return row ?? null;
+}
+
+/** The user's providers — the key value is never selected, only key_set. */
+export function listUserProviderKeys(userId: number): UserProviderKeyListRow[] {
+  const rows = localDb()
+    .prepare(
+      `SELECT provider,
+              (api_key IS NOT NULL AND api_key <> '') AS key_set,
+              base_url, updated_at
+         FROM user_provider_keys
+        WHERE user_id = ?
+        ORDER BY provider`,
+    )
+    .all(userId) as (Omit<UserProviderKeyListRow, 'key_set'> & { key_set: number })[];
+  return rows.map((r) => ({ ...r, key_set: Boolean(r.key_set) }));
+}
+
+/**
+ * Insert or update a provider key. A null apiKey on update preserves the stored key (same
+ * convention as /v1/model-prompts).
+ */
+export function upsertUserProviderKey(
+  userId: number,
+  provider: string,
+  apiKey: string | null,
+  baseUrl: string | null,
+): void {
+  if (apiKey === null) {
+    apiKey = userProviderKey(userId, provider)?.api_key ?? null;
+  }
+  localDb()
+    .prepare(
+      `INSERT INTO user_provider_keys (user_id, provider, api_key, base_url)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, provider) DO UPDATE SET
+         api_key    = excluded.api_key,
+         base_url   = excluded.base_url,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+    )
+    .run(userId, provider, apiKey, baseUrl);
+}
+
+/** Delete a provider key; returns true if a row was removed. */
+export function deleteUserProviderKey(userId: number, provider: string): boolean {
+  return (
+    localDb()
+      .prepare(`DELETE FROM user_provider_keys WHERE user_id = ? AND provider = ?`)
+      .run(userId, provider).changes > 0
+  );
+}
+
+/* ----------------------------- per-user task → model choices ----------------------------- */
+
+/** The user's model choice for a task, or null. */
+export function userModelChoice(userId: number, task: string): UserModelChoiceRow | null {
+  const row = localDb()
+    .prepare(
+      `SELECT task, model_name, system_prompt FROM user_model_choices
+        WHERE user_id = ? AND task = ? LIMIT 1`,
+    )
+    .get(userId, task) as UserModelChoiceRow | undefined;
+  return row ?? null;
+}
+
+/** All of the user's task → model choices (the prompt override reported only as a flag). */
+export function listUserModelChoices(userId: number): UserModelChoiceListRow[] {
+  const rows = localDb()
+    .prepare(
+      `SELECT task, model_name,
+              (system_prompt IS NOT NULL AND system_prompt <> '') AS system_prompt_override,
+              updated_at
+         FROM user_model_choices
+        WHERE user_id = ?
+        ORDER BY task`,
+    )
+    .all(userId) as (Omit<UserModelChoiceListRow, 'system_prompt_override'> & {
+    system_prompt_override: number;
+  })[];
+  return rows.map((r) => ({ ...r, system_prompt_override: Boolean(r.system_prompt_override) }));
+}
+
+/** Insert or replace the user's model choice for a task. */
+export function upsertUserModelChoice(
+  userId: number,
+  task: string,
+  modelName: string,
+  systemPrompt: string | null,
+): void {
+  localDb()
+    .prepare(
+      `INSERT INTO user_model_choices (user_id, task, model_name, system_prompt)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, task) DO UPDATE SET
+         model_name    = excluded.model_name,
+         system_prompt = excluded.system_prompt,
+         updated_at    = strftime('%Y-%m-%dT%H:%M:%fZ','now')`,
+    )
+    .run(userId, task, modelName, systemPrompt);
+}
+
+/** Delete the user's model choice for a task; returns true if a row was removed. */
+export function deleteUserModelChoice(userId: number, task: string): boolean {
+  return (
+    localDb()
+      .prepare(`DELETE FROM user_model_choices WHERE user_id = ? AND task = ?`)
+      .run(userId, task).changes > 0
+  );
 }

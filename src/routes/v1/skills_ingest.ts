@@ -26,8 +26,8 @@ import { jsonResponse } from '../../http/response.js';
 import { jsonError } from '../../http/errors.js';
 import { bodyObject } from '../../http/request.js';
 import { llmComplete, llmJsonFromText } from '../../memory/llm.js';
+import { resolveTaskConfig, type ResolvedTaskConfig } from '../../memory/resolve.js';
 import { renderTypeCatalog } from '../../memory/type-catalog.js';
-import { modelPrompt } from '../../local-db/local-db.js';
 import {
   bundleHash,
   coerceSkillExtraction,
@@ -36,7 +36,6 @@ import {
   materialityScreens,
   type SkillFileRef,
 } from '../../skills/helpers.js';
-import type { ModelPromptRow } from '../../types/auth.js';
 import type { RequestCtx } from '../../types/db.js';
 
 const FILE = 'skills_ingest.ts';
@@ -150,7 +149,7 @@ function decodeFiles(body: Record<string, unknown>, markdown: string): DecodedFi
  * a judge failure must never hide a version wrongly.
  */
 async function judgeMateriality(
-  pr: ModelPromptRow,
+  pr: ResolvedTaskConfig,
   parentMarkdown: string,
   newMarkdown: string,
   name: string,
@@ -213,7 +212,7 @@ export async function register(app: FastifyInstance): Promise<void> {
         body.frontmatter !== null && typeof body.frontmatter === 'object' && !Array.isArray(body.frontmatter)
           ? (body.frontmatter as Record<string, unknown>)
           : {};
-      const model =
+      let model =
         body.model !== undefined && body.model !== null && String(body.model).trim() !== ''
           ? String(body.model).trim()
           : null;
@@ -336,7 +335,7 @@ export async function register(app: FastifyInstance): Promise<void> {
           materiallyDifferent = false;
         } else {
           // gray zone
-          const prJudge = model !== null ? modelPrompt(model) : null;
+          const prJudge = resolveTaskConfig(Number(ctx.userId), 'skill_extract', model);
           if (prJudge !== null && prJudge.api_key !== null && prJudge.api_key !== '') {
             materiallyDifferent = await judgeMateriality(
               prJudge,
@@ -353,18 +352,19 @@ export async function register(app: FastifyInstance): Promise<void> {
         materiality.materially_different = materiallyDifferent;
       }
 
-      // Discovery extraction: LLM when a model is configured, else the deterministic
-      // frontmatter-only fallback.
+      // Discovery extraction: LLM when a model is configured (explicit `model`, or the user's
+      // stored 'skill_extract' choice), else the deterministic frontmatter-only fallback.
       let extraction: Record<string, unknown>;
-      if (model !== null) {
-        const pr = modelPrompt(model);
-        if (pr === null) {
-          jsonError(
-            'model_not_configured',
-            'No prompt configured for model "' + model + '". Set one via POST /v1/model-prompts.',
-            422,
-          );
-        }
+      const pr = resolveTaskConfig(Number(ctx.userId), 'skill_extract', model);
+      if (model !== null && pr === null) {
+        jsonError(
+          'model_not_configured',
+          'No prompt configured for model "' + model + '". Set one via POST /v1/model-prompts.',
+          422,
+        );
+      }
+      if (pr !== null) {
+        model = pr.model_name || model;
         const catalog = await renderTypeCatalog(ctx);
         const system = String(pr.system_prompt ?? '')
           .replace(/\{\{ENTITY_TYPES\}\}/g, catalog.entityBlock)
@@ -389,7 +389,12 @@ export async function register(app: FastifyInstance): Promise<void> {
           return;
         }
         if (pr.api_key === null || pr.api_key === '') {
-          jsonError('model_api_key_missing', 'No API key set for model "' + model + '".', 409);
+          const msg =
+            pr.source === 'catalog_explicit' || pr.source === 'user_choice'
+              ? `No API key stored for provider "${pr.provider}".` +
+                ` Set one via PUT /v1/llm/providers/${pr.provider}.`
+              : 'No API key set for model "' + model + '".';
+          jsonError('model_api_key_missing', msg, 409);
         }
         const cfg = {
           api_format: pr.api_format ?? 'openai',

@@ -25,8 +25,10 @@ import { dbTxCore } from '../../db/tx.js';
 import { jsonResponse } from '../../http/response.js';
 import { jsonError } from '../../http/errors.js';
 import { bodyObject } from '../../http/request.js';
-import { memChunk, memEmbed, memExtract } from '../../memory/llm.js';
+import { memChunk, memEmbed, memExtract, type LlmConfig } from '../../memory/llm.js';
+import { resolveEmbedConfig, resolveTaskConfig, type ResolvedTaskConfig } from '../../memory/resolve.js';
 import { memVectorLiteral, memResolveToken } from '../../memory/memory-db.js';
+import { modelPrompt } from '../../local-db/local-db.js';
 
 const FILE = 'memory_documents.ts';
 
@@ -99,26 +101,85 @@ export async function register(app: FastifyInstance): Promise<void> {
       // jsonb is already parsed by node-pg — no JSON.parse.
       const cfg = row !== null && row.cfg !== null ? (row.cfg as Record<string, unknown>) : {};
 
+      // Embedding model precedence: body > namespace config > the user's 'embed' choice > env.
+      const userEmbed = resolveEmbedConfig(Number(ctx.userId));
       const embeddingModel =
         body.embedding_model !== undefined && String(body.embedding_model).trim() !== ''
           ? String(body.embedding_model)
           : ((cfg.embedding_model as string | undefined) ??
+            userEmbed.embedding_model ??
             (process.env.MALUDB_EMBED_MODEL || 'maludb-local-dev'));
       const defaultSubject = (cfg.default_subject_type as string | undefined) ?? 'other';
       const defaultProv = (cfg.default_provenance as string | undefined) ?? 'suggested';
-      const modelId = (cfg.model_identifier as string | undefined) ?? '';
 
-      // extraction config for the (real) LLM call
-      const extractCfg = {
-        base_url: (cfg.base_url as string | undefined) ?? '',
-        model_identifier: modelId,
-        prompt_template: (cfg.prompt_template as string | undefined) ?? null,
-        generation_params:
-          (cfg.generation_params as Record<string, unknown> | undefined) ?? {},
-        token: await memResolveToken(ctx, (cfg.secret_ref as string | undefined) ?? null),
-      };
-      // embedding config (embedding endpoint comes from env; DB config carries only the model label)
-      const embedCfg = { embedding_model: embeddingModel };
+      // Extraction connection: Store A (namespace) first, else borrow from Store B
+      // (model_prompts / the seeded catalog) so a tenant that only configured
+      // /v1/memory/ingest can still extract here. The candidate_edges contract
+      // (prompt_template) is never taken from Store B — its prompt targets a different
+      // contract.
+      let extractCfg: LlmConfig;
+      const cfgBaseUrl = String((cfg.base_url as string | undefined) ?? '').trim();
+      const cfgModelId = String((cfg.model_identifier as string | undefined) ?? '').trim();
+      if (cfgBaseUrl !== '' && cfgModelId !== '') {
+        extractCfg = {
+          api_format: 'openai',
+          base_url: cfgBaseUrl,
+          model_identifier: cfgModelId,
+          prompt_template: (cfg.prompt_template as string | undefined) ?? null,
+          generation_params:
+            (cfg.generation_params as Record<string, unknown> | undefined) ?? {},
+          max_tokens: 2048,
+          token: await memResolveToken(ctx, (cfg.secret_ref as string | undefined) ?? null),
+        };
+      } else {
+        // Borrow a connection from Store B: explicit model → the user's 'extract' choice →
+        // the legacy 'chatgpt-4o' model_prompts row. Only the connection crosses over.
+        const fbModel =
+          body.model !== undefined && String(body.model).trim() !== ''
+            ? String(body.model).trim()
+            : null;
+        let pr: ResolvedTaskConfig | null = resolveTaskConfig(
+          Number(ctx.userId),
+          'extract',
+          fbModel,
+        );
+        if (pr === null) {
+          const legacy = modelPrompt(fbModel ?? 'chatgpt-4o');
+          if (legacy !== null) pr = { ...legacy, provider: null, source: 'model_prompts' };
+        }
+        if (pr !== null && String(pr.base_url ?? '').trim() !== '') {
+          extractCfg = {
+            api_format: pr.api_format ?? 'openai',
+            base_url: pr.base_url ?? '',
+            model_identifier: pr.model_identifier || pr.model_name || '',
+            prompt_template: (cfg.prompt_template as string | undefined) ?? null, // default candidate_edges template
+            generation_params:
+              pr.generation_params !== null && pr.generation_params !== ''
+                ? (JSON.parse(pr.generation_params) as Record<string, unknown>)
+                : {},
+            max_tokens: Number(pr.max_tokens ?? 2048),
+            token: pr.api_key,
+          };
+        } else {
+          // Neither store configured — only caller-supplied "edges" can be ingested;
+          // memExtract (if reached) raises model_not_configured.
+          extractCfg = {
+            api_format: 'openai',
+            base_url: '',
+            model_identifier: '',
+            prompt_template: (cfg.prompt_template as string | undefined) ?? null,
+            generation_params:
+              (cfg.generation_params as Record<string, unknown> | undefined) ?? {},
+            max_tokens: 2048,
+            token: await memResolveToken(ctx, (cfg.secret_ref as string | undefined) ?? null),
+          };
+        }
+      }
+
+      const modelId = String(extractCfg.model_identifier ?? '');
+      // Embedding config — the user's stored embed connection (if any), with the resolved
+      // embedding_model name on top.
+      const embedCfg: LlmConfig = { ...userEmbed, embedding_model: embeddingModel };
 
       // --- 1. obtain candidate edges: caller-supplied (bypass) OR LLM extraction per chunk ---
       const provided = Array.isArray(body.edges) ? (body.edges as unknown[]) : null;
