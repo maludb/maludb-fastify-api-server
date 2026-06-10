@@ -104,6 +104,19 @@ content for a `model_prompts` row**: register it (with your model + API key) via
 `POST /v1/model-prompts` to enable LLM-based discovery-tag extraction on ingest. Without a
 configured model, ingest falls back to a deterministic frontmatter-only extractor.
 
+### MCP (Model Context Protocol)
+
+`POST /mcp` is a stateless MCP server endpoint (Streamable HTTP, spec 2025-06-18) — MCP clients
+can use MaluDB as long-term memory with nothing but the URL and a Bearer token:
+
+```bash
+claude mcp add --transport http maludb http://localhost:8080/mcp \
+  --header "Authorization: Bearer malu_…"
+```
+
+Eight tools: `store_memory`, `search_memory`, `find_subjects`, `explore_subject`,
+`store_document`, `get_document`, `find_skills`, `get_skill`.
+
 ## Develop
 
 ```bash

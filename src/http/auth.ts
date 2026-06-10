@@ -16,12 +16,16 @@ import type { RequestCtx } from '../types/db.js';
 
 const PREFIX = 'malu_';
 
-/** Extract the bearer token from the Authorization header, or null. */
-export function bearerToken(request: FastifyRequest): string | null {
-  const hdr = request.headers.authorization;
+/** Extract the bearer token from an Authorization header value, or null. */
+function tokenFromHeader(hdr: string | undefined): string | null {
   if (typeof hdr !== 'string') return null;
   const m = hdr.trim().match(/^Bearer\s+(\S+)$/i);
   return m ? (m[1] ?? null) : null;
+}
+
+/** Extract the bearer token from the Authorization header, or null. */
+export function bearerToken(request: FastifyRequest): string | null {
+  return tokenFromHeader(request.headers.authorization);
 }
 
 function sha256Hex(s: string): string {
@@ -29,15 +33,13 @@ function sha256Hex(s: string): string {
 }
 
 /**
- * Authenticate the request and build its `ctx`. `endpointFile` is the route file's own name (e.g.
- * `'subjects.ts'`) — it labels the SQL log and the `?debug=1` block, so the URL→file→SQL trail
- * stays intact. Aborts with 401 `auth_missing` / `auth_invalid` on failure.
+ * Resolve an `Authorization` header value to a request context: extract the `malu_` token, hash
+ * its body, look it up in the local store, and bind the tenant pool. Throws 401 `auth_missing` /
+ * `auth_invalid` on failure. Shared by the REST `requireAuth` dependency and the MCP endpoint —
+ * request-specific fields (`method`, `path`, `debug`) are left for the caller to fill in.
  */
-export async function requireAuth(
-  request: FastifyRequest,
-  endpointFile: string,
-): Promise<RequestCtx> {
-  const token = bearerToken(request);
+export function resolveAuthContext(authHeader: string | undefined, endpointFile: string): RequestCtx {
+  const token = tokenFromHeader(authHeader);
   if (token === null) {
     jsonError('auth_missing', 'Authorization: Bearer token required.', 401);
   }
@@ -51,8 +53,7 @@ export async function requireAuth(
   }
 
   const tenant = tenantOf(row);
-  const query = (request.query ?? {}) as Record<string, unknown>;
-  const ctx: RequestCtx = {
+  return {
     userId: row.user_id,
     role: row.role,
     tokenPrefix: body.slice(0, 8),
@@ -60,10 +61,26 @@ export async function requireAuth(
     pool: getPool(tenant),
     sqlTrace: [],
     endpointFile,
-    method: request.method,
-    path: request.url,
-    debug: debugEnabled() && query.debug === '1',
+    method: '',
+    path: '',
+    debug: false,
   };
+}
+
+/**
+ * Authenticate the request and build its `ctx`. `endpointFile` is the route file's own name (e.g.
+ * `'subjects.ts'`) — it labels the SQL log and the `?debug=1` block, so the URL→file→SQL trail
+ * stays intact. Aborts with 401 `auth_missing` / `auth_invalid` on failure.
+ */
+export async function requireAuth(
+  request: FastifyRequest,
+  endpointFile: string,
+): Promise<RequestCtx> {
+  const ctx = resolveAuthContext(request.headers.authorization, endpointFile);
+  const query = (request.query ?? {}) as Record<string, unknown>;
+  ctx.method = request.method;
+  ctx.path = request.url;
+  ctx.debug = debugEnabled() && query.debug === '1';
   // Stash on the request so the api.log hook can report user_id + token_prefix.
   (request as FastifyRequest & { ctx?: RequestCtx }).ctx = ctx;
   return ctx;

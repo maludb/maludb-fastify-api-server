@@ -29,6 +29,7 @@ import { register as graphWalk } from '../routes/v1/graph_walk.js';
 import { register as llmCatalog } from '../routes/v1/llm_catalog.js';
 import { register as llmModels } from '../routes/v1/llm_models.js';
 import { register as llmProviders } from '../routes/v1/llm_providers.js';
+import { register as mcp } from '../routes/v1/mcp.js';
 import { register as memoryConfig } from '../routes/v1/memory_config.js';
 import { register as memoryDocuments } from '../routes/v1/memory_documents.js';
 import { register as memoryIngest } from '../routes/v1/memory_ingest.js';
@@ -96,6 +97,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await llmCatalog(app);
   await llmModels(app);
   await llmProviders(app);
+  await mcp(app);
   await memoryConfig(app);
   await memoryDocuments(app);
   await memoryIngest(app);
