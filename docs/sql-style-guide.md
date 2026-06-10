@@ -21,8 +21,9 @@ read the query and understand what MaluDB is doing. These rules keep it that way
    or an endpoint-constant identifier (a fixed view/column name, never user input).
 7. **Never concatenate untrusted input into SQL.** All user input is a bound parameter.
 8. **Keep search-path-sensitive calls inside `dbTxCore`.** The maludb_* facade views/functions
-   resolve their `malu$*` base tables only when `maludb_core` is on the path
-   (`SET LOCAL search_path TO public, maludb_core`).
+   resolve their `malu$*` base tables only when `maludb_core` is on the path. `dbTxCore` layers
+   `maludb_core, public` onto the login search_path per transaction (`SET LOCAL` semantics), so a
+   tenant schema pinned on the role stays first and `current_schema()` keeps resolving to it.
 9. **Keep graph, memory, SVPOR, and attribute SQL visible in the endpoint file.** Do not push it into
    a repository layer. The shared `db/statements.ts`, `db/attributes.ts`, and `db/documents.ts`
    helpers exist only because the PHP shared them too (and they keep their SQL literal and visible).

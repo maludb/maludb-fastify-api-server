@@ -3,10 +3,13 @@
  * POST /v1/skills
  *
  * MaluDB concept: Skills (requirements.md §4.8).
- * SQL objects: maludb_skill (direct-INSERT view; skill_id from sequence).
+ * SQL objects: maludb_skill (direct-INSERT view; skill_id from sequence),
+ *              maludb_skill_search (function; ?subject= / ?verb= tag search, 0.97.0).
  * Teaches:
  *   - Live-schema mapping: skill_id -> id, skill_name -> name; the skill body lives in `markdown`.
- *   - GET supports an optional visibility filter and q search.
+ *   - GET supports an optional visibility filter and q search; with ?subject= or ?verb= the
+ *     listing switches to tag-aware discovery through maludb_skill_search (0.97.0), which folds
+ *     in visible public skills, scoring, match_reasons, and fork lineage.
  *   - POST defaults: version '1.0.0', visibility 'private', enabled true (DB-side defaults).
  *     DB enforces visibility ∈ {private,shared,public} and packaging_kind ∈
  *     {system_prompt,markdown,mcp_tool,plugin} (→ 422).
@@ -30,7 +33,33 @@ export async function register(app: FastifyInstance): Promise<void> {
       if (request.method === 'GET') {
         const visibility = queryStr(request, 'visibility', null, 40);
         const q = queryStr(request, 'q', null, 200);
+        const subject = queryStr(request, 'subject', null, 200);
+        const verb = queryStr(request, 'verb', null, 200);
         const limit = queryInt(request, 'limit', 50, 200) ?? 50;
+
+        // Tag-aware discovery: subject/verb hit the skill_subject/skill_verb tag tables (and q
+        // the keyword/tsquery rails) through maludb_skill_search, which also folds in visible
+        // public skills, scoring, and lineage. The plain list keeps the ILIKE semantics.
+        if ((subject !== null && subject !== '') || (verb !== null && verb !== '')) {
+          const rows = await dbMany(
+            ctx,
+            `SELECT owner_schema, skill_id AS id, skill_name AS name, description,
+                    version, visibility, subjects, verbs, keywords, score,
+                    match_reasons, is_public, is_forkable,
+                    source_owner_schema, source_skill_id, updated_at
+               FROM maludb_skill_search($1, $2, $3, NULL, $4)`,
+            [q, subject, verb, limit],
+          );
+          for (const r of rows) {
+            r.id = Number(r.id);
+            r.score = r.score === null ? null : Number(r.score);
+            if (r.source_skill_id !== null) {
+              r.source_skill_id = Number(r.source_skill_id);
+            }
+          }
+          jsonResponse(reply, { skills: rows }, 200, ctx);
+          return;
+        }
 
         const clauses: string[] = [];
         const params: unknown[] = [];

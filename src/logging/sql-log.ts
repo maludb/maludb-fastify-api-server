@@ -5,12 +5,27 @@
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { sqlLogPath } from '../config/paths.js';
 import type { RequestCtx } from '../types/db.js';
 
 /** ISO-8601 UTC timestamp with millisecond precision, e.g. `2026-06-08T12:34:56.789Z`. */
 export function isoNowMs(): string {
   return new Date().toISOString();
+}
+
+/**
+ * A loggable stand-in for one query parameter. bytea params (document bytes, skill bundle
+ * files) are summarized — JSON.stringify of a Buffer explodes into `{"type":"Buffer",...}`
+ * and megabyte blobs don't belong in sql.log or `?debug=1` responses anyway.
+ */
+export function jsonSafeParam(p: unknown): unknown {
+  if (Buffer.isBuffer(p) || p instanceof Uint8Array) {
+    const b = Buffer.isBuffer(p) ? p : Buffer.from(p);
+    const sha = createHash('sha256').update(b).digest('hex').slice(0, 12);
+    return `<${b.length} bytes sha256:${sha}>`;
+  }
+  return p;
 }
 
 /** Render the multi-line `sql.log` block for one executed statement. */
@@ -60,9 +75,10 @@ export function sqlLog(
   durMs: number,
   loggedParams: unknown[] = params,
 ): void {
+  const safeParams = loggedParams.map(jsonSafeParam);
   ctx.sqlTrace.push({
     sql: sql.trim(),
-    params: loggedParams,
+    params: safeParams,
     rows,
     dur_ms: Math.round(durMs * 10) / 10,
   });
@@ -75,7 +91,7 @@ export function sqlLog(
       path: ctx.path,
       user: String(ctx.userId),
       sql,
-      params: loggedParams,
+      params: safeParams,
       rows,
       durMs,
     }),

@@ -23,6 +23,7 @@ import { jsonResponse } from '../../http/response.js';
 import { jsonError } from '../../http/errors.js';
 import { bodyObject } from '../../http/request.js';
 import { llmComplete, llmJsonFromText } from '../../memory/llm.js';
+import { renderTypeCatalog } from '../../memory/type-catalog.js';
 import { modelPrompt } from '../../local-db/local-db.js';
 
 const FILE = 'memory_ingest.ts';
@@ -109,46 +110,15 @@ export async function register(app: FastifyInstance): Promise<void> {
 
       // --- SUBJECT TYPE CATALOG (0.96.0): render the entity/event vocabularies straight from the
       //     tenant catalog so the prompt's allowed types can never drift from what the ingest
-      //     accepts. The maludb_subject_type facade exposes `category` once a tenant has re-run
-      //     enable_memory_schema(); until then we fall back to the maludb_core base table, which
-      //     carries `category` immediately after the 0.96.0 extension upgrade. ---
-      let typeRows;
-      try {
-        typeRows = await dbMany(
-          ctx,
-          'SELECT category, subject_type, description FROM maludb_subject_type ORDER BY category, sort_order',
-        );
-      } catch {
-        // single-quoted on purpose: the `$` in malu$svpor_* must not be parsed as a variable
-        typeRows = await dbMany(
-          ctx,
-          'SELECT category, subject_type, description FROM maludb_core.malu$svpor_subject_type ORDER BY category, sort_order',
-        );
-      }
-      const entityLines: string[] = [];
-      const eventLines: string[] = [];
-      for (const r of typeRows) {
-        const desc =
-          r.description !== undefined && String(r.description ?? '').trim() !== ''
-            ? ' — ' + String(r.description)
-            : '';
-        const line = '  - ' + String(r.subject_type) + desc;
-        if ((r.category ?? 'entity') === 'event') {
-          eventLines.push(line);
-        } else {
-          entityLines.push(line);
-        }
-      }
-      // Fallbacks keep the model inside the catalog even if a list comes back empty.
-      const entityBlock = entityLines.length !== 0 ? entityLines.join('\n') : '  - other';
-      const eventBlock = eventLines.length !== 0 ? eventLines.join('\n') : '  - task';
+      //     accepts (shared with /v1/skills/ingest — see src/memory/type-catalog.ts). ---
+      const catalog = await renderTypeCatalog(ctx);
 
       // --- build the messages ---
       // Substitute the rendered catalog into the stored SYSTEM prompt. A legacy prompt with no
       // {{ENTITY_TYPES}}/{{EVENT_KINDS}} placeholders is left unchanged (backward-compatible).
       const system = pr.system_prompt
-        .replace(/\{\{ENTITY_TYPES\}\}/g, entityBlock)
-        .replace(/\{\{EVENT_KINDS\}\}/g, eventBlock);
+        .replace(/\{\{ENTITY_TYPES\}\}/g, catalog.entityBlock)
+        .replace(/\{\{EVENT_KINDS\}\}/g, catalog.eventBlock);
       const user = `TEXT:\n${text}\n\nHINTS:\n${hintsJson}\n\nKNOWN_SUBJECTS:\n${knownSubjectsJson}\n\nKNOWN_VERBS:\n${knownVerbsJson}\n`;
 
       if (preview) {
@@ -162,8 +132,8 @@ export async function register(app: FastifyInstance): Promise<void> {
             counts: {
               known_subjects: subjRows.length,
               known_verbs: verbRows.length,
-              entity_types: entityLines.length,
-              event_kinds: eventLines.length,
+              entity_types: catalog.entityCount,
+              event_kinds: catalog.eventCount,
             },
           },
           200,

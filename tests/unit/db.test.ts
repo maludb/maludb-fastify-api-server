@@ -114,7 +114,10 @@ describe('dbTxCore', () => {
 
     expect(result).toEqual({ ok: true });
     expect(issued[0]).toBe('BEGIN');
-    expect(issued[1]).toBe('SET LOCAL search_path TO public, maludb_core');
+    // Layers maludb_core onto the LOGIN search_path (keeps a role-pinned tenant schema first).
+    expect(issued[1]).toBe(
+      "SELECT set_config('search_path', current_setting('search_path') || ', maludb_core, public', true)",
+    );
     expect(issued).toContain('COMMIT');
     expect(ctx.client).toBeUndefined(); // restored after the tx
   });

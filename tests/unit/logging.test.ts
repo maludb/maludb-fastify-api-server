@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { redactParams } from '../../src/logging/redact.js';
-import { formatSqlLine, sqlLog } from '../../src/logging/sql-log.js';
+import { formatSqlLine, jsonSafeParam, sqlLog } from '../../src/logging/sql-log.js';
 import { apiLog } from '../../src/logging/api-log.js';
 import { sqlLogPath, apiLogPath } from '../../src/config/paths.js';
 import type { RequestCtx } from '../../src/types/db.js';
@@ -67,6 +67,29 @@ describe('sqlLog', () => {
     expect(ctx.sqlTrace[0]?.params).toEqual(['<redacted>']);
     const log = readFileSync(sqlLogPath(), 'utf8');
     expect(log).not.toContain('"tok"');
+  });
+
+  it('summarizes Buffer params in both the trace and the log line', () => {
+    const ctx = fakeCtx();
+    const buf = Buffer.from('binary skill file');
+    sqlLog(ctx, 'INSERT INTO maludb_source_package (content_bytes) VALUES ($1)', [buf], 1, 0.3);
+    const summary = jsonSafeParam(buf) as string;
+    expect(summary).toMatch(/^<17 bytes sha256:[0-9a-f]{12}>$/);
+    expect(ctx.sqlTrace[0]?.params).toEqual([summary]);
+    const log = readFileSync(sqlLogPath(), 'utf8');
+    expect(log).toContain(summary);
+    expect(log).not.toContain('"type":"Buffer"');
+  });
+});
+
+describe('jsonSafeParam', () => {
+  it('passes scalars through untouched', () => {
+    expect(jsonSafeParam('a')).toBe('a');
+    expect(jsonSafeParam(7)).toBe(7);
+    expect(jsonSafeParam(null)).toBeNull();
+  });
+  it('summarizes Uint8Array too', () => {
+    expect(jsonSafeParam(new Uint8Array([1, 2, 3]))).toMatch(/^<3 bytes sha256:[0-9a-f]{12}>$/);
   });
 });
 
