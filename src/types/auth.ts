@@ -37,3 +37,58 @@ export interface ModelPromptRow {
   max_tokens: number;
   generation_params: string | null;
 }
+
+/** A seeded `default_prompts` catalog row (full row, including the prompt text). */
+export interface DefaultPromptRow {
+  provider: string;
+  model_name: string;
+  model_identifier: string;
+  api_format: string;
+  base_url: string;
+  task: string;
+  system_prompt: string | null;
+  max_tokens: number;
+  generation_params: string | null;
+}
+
+/** A catalog listing row — the prompt text is replaced by a has_system_prompt flag. */
+export interface DefaultPromptListRow {
+  provider: string;
+  model_name: string;
+  model_identifier: string;
+  api_format: string;
+  base_url: string;
+  task: string;
+  max_tokens: number;
+  has_system_prompt: boolean;
+}
+
+/** A user's stored provider key (includes the key value — internal use only, never serialized). */
+export interface UserProviderKeyRow {
+  provider: string;
+  api_key: string | null;
+  base_url: string | null;
+}
+
+/** A provider listing row — the key value is never selected, only the key_set flag. */
+export interface UserProviderKeyListRow {
+  provider: string;
+  key_set: boolean;
+  base_url: string | null;
+  updated_at: string;
+}
+
+/** The user's stored model choice for one task. */
+export interface UserModelChoiceRow {
+  task: string;
+  model_name: string;
+  system_prompt: string | null;
+}
+
+/** A model-choice listing row — the prompt override is reported only as a flag. */
+export interface UserModelChoiceListRow {
+  task: string;
+  model_name: string;
+  system_prompt_override: boolean;
+  updated_at: string;
+}

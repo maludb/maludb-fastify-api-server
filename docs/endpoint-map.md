@@ -510,6 +510,16 @@ MaluDB SQL objects → request/response shape → the MaluDB concept it teaches.
 - **Response**: `{namespace,embedding_model,results:[{chunk_id,statement_id,document_id,source_text,distance,similarity,rank_no,subject_name,verb_name}]}`
 - **Teaches**: Search must embed with the SAME model/dimension used at ingest, and pre-filters to a (subject,verb) compartment before the ANN scan.
 
+## MCP
+
+### `POST` /mcp   → `mcp.ts`
+- **Methods**: POST — stateless MCP endpoint (JSON-RPC 2.0, spec 2025-06-18; no sessions, no SSE, no batches); GET/DELETE → 405 `Allow: POST`
+- **SQL objects**: maludb_subject, maludb_document, maludb_document_tag, maludb_source_package, maludb_skill, maludb_skill_file, maludb_graph_neighbors / maludb_graph_walk / maludb_skill_search (functions); plus everything the memory pipeline cores touch
+- **tx**: yes — `db_tx_core()` for the graph tools and inside the shared memory cores
+- **Request**: JSON-RPC `initialize` / `ping` / `tools/list` / `tools/call` (+ `notifications/*` → 202); same Bearer auth as REST
+- **Response**: single JSON-RPC object; tool failures are successes with `isError:true` carrying the standard `{error:{code,message}}` payload
+- **Teaches**: Eight tools (store_memory, search_memory, find_subjects, explore_subject, store_document, get_document, find_skills, get_skill) make MaluDB an agent's long-term memory. Pipeline tools call the cores exported by the memory route files; read tools carry their own literal SQL. The TOOLS registry is a cross-server contract shared with the Python and PHP servers.
+
 ## Model prompts
 
 ### `GET POST` /v1/model-prompts   → `model-prompts.ts`
